@@ -20,3 +20,19 @@ This Flask web application allows users to take RGB satellite image and receive 
 - Pillow
 
 ### 1. Clone the Repository
+```bash
+https://github.com/kawish14/Water-Body-Masking.git
+cd Water-Body-Masking
+```
+### 2. Create and Activate a Virtual Environment
+#### on windows
+```bash
+python -m venv venv
+venv\Scripts\activate
+```
+
+### 3. Run the App
+```bash
+python app.py
+```
+
