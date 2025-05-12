@@ -21,6 +21,7 @@ This Flask web application allows users to upload RGB satellite images and recei
 - scikit-learn
 - os
 - io
+
 You can install them using:
 ```bash
 pip install -r requirements.txt
