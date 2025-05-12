@@ -11,19 +11,20 @@ This Flask web application allows users to upload RGB satellite images and recei
 
 ## Requirements
 - Python 3.8+
-- Flask
-- TensorFlow
-- OpenCV (`cv2`)
-- NumPy
-- GDAL
-- Matplotlib
-- io
-- os
-- Pillow
+- flask
+- flask-cors
+- tensorflow
+- pillow
 - numpy
 - pandas
-- PIL
-- sklearn
+- matplotlib
+- scikit-learn
+- os
+- io
+You can install them using:
+```bash
+pip install -r requirements.txt
+```
 
 ### 1. Clone the Repository
 ```bash
