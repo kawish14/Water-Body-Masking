@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>High-Res JPG Export (ArcGIS JS)</title>
+  <link rel="stylesheet" href="https://js.arcgis.com/4.30/esri/themes/light/main.css" />
+  <style>
+    html, body, #viewDiv { padding:0; margin:0; width:100%; height:100%; }
+  </style>
+  <script src="https://js.arcgis.com/4.30/"></script>
+</head>
+
+  <!-- <button id="drawBtn">Draw Export Area</button> -->
+  <button id="exportBtn" style="display:none;">Export JPG</button>
+  <input id="thresholdInput" type="number" min="0.0" max="1.0" step="0.01" value="0.0" style="padding: 3px;" />
+  
+  <div id="viewDiv"></div>
+
+  <script>
+    require([
+      "esri/Map",
+      "esri/views/MapView",
+      "esri/widgets/Sketch",
+      "esri/layers/GraphicsLayer",
+      "esri/Graphic",
+      "esri/widgets/Search" 
+    ], function(Map, MapView, Sketch, GraphicsLayer, Graphic, Search) {
+
+      const map = new Map({ basemap: "satellite" });
+      const view = new MapView({ 
+        container: "viewDiv", 
+        map: map, 
+        center: [67.0011, 24.8607], 
+        zoom: 13 
+      });
+      const graphicsLayer = new GraphicsLayer(); 
+      
+      const searchWidget = new Search({
+            view: view
+        });
+        view.ui.add(searchWidget, {
+            position: "top-left",
+            index: 0
+        });
+      // Sketch widget to draw rectangle
+      const sketch = new Sketch({ 
+        view, 
+        layer: graphicsLayer, 
+        creationMode: 'single', 
+        availableCreateTools: ['rectangle'] 
+      });
+      view.ui.add(sketch, 'top-right');
+      view.ui.add(document.getElementById('drawBtn'), 'bottom-right');
+      view.ui.add(document.getElementById('exportBtn'), 'bottom-right');
+  
+      view.ui.add(document.getElementById("thresholdInput"), "top-right")
+
+      let exportExtent = null;
+
+    /*   document.getElementById('drawBtn').onclick = () => { 
+        sketch.complete(); 
+        document.getElementById('exportBtn').style.display = 'none'; 
+      }; */
+    
+      sketch.on('create', event => {
+        
+        if (event.state !== 'complete') document.getElementById('exportBtn').style.display = 'none';
+        if(event.state === 'complete'){
+            exportExtent = event.graphic.geometry.extent;
+            document.getElementById('exportBtn').style.display = 'block';
+            map.add(graphicsLayer);
+        }
+       
+      });
+
+      document.getElementById('exportBtn').onclick = async () => {
+        if (!exportExtent) return;
+
+        // Convert extent to screen coordinates
+        const topLeft = view.toScreen({ x: exportExtent.xmin, y: exportExtent.ymax });
+        const bottomRight = view.toScreen({ x: exportExtent.xmax, y: exportExtent.ymin });
+
+        // Calculate screen area to capture
+        const x = Math.min(topLeft.x, bottomRight.x);
+        const y = Math.min(topLeft.y, bottomRight.y);
+        const width = Math.abs(topLeft.x - bottomRight.x);
+        const height = Math.abs(topLeft.y - bottomRight.y);
+
+        // Take screenshot with specified screen area
+        const screenshot = await view.takeScreenshot({
+          area: { x, y, width, height },
+          format: 'jpg'
+        });
+
+        const blob = await (await fetch(screenshot.dataUrl)).blob();
+        const formData = new FormData();
+        formData.append("image", blob, "image.jpg");
+        
+        formData.append("threshold", parseFloat(document.getElementById("thresholdInput").value));
+
+        const resp = await fetch("http://localhost:5000/predict", {
+          method: "POST",
+          body: formData
+        });
+
+        const maskBlob = await resp.blob();
+        const maskUrl  = URL.createObjectURL(maskBlob);
+
+       /*  const zipBlob = await resp.blob();
+        const zipUrl = URL.createObjectURL(zipBlob);
+
+        const zipLink = document.createElement('a');
+        zipLink.href = zipUrl;
+        zipLink.download = 'output.zip';  // will include mask.png + image.jgw
+        document.body.appendChild(zipLink);
+        zipLink.click();
+        document.body.removeChild(zipLink); */
+
+        const maskLink = document.createElement('a');
+        maskLink.href = maskUrl;
+        maskLink.download = 'mask.png';  // Name for the downloaded file
+        document.body.appendChild(maskLink);
+        maskLink.click();
+        document.body.removeChild(maskLink);
+        
+        // Trigger download
+        const a = document.createElement('a');
+        a.href = screenshot.dataUrl;
+        a.download = 'image.jpg';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        graphicsLayer.removeAll()
+      };
+
+    });
+  </script>
+</body>
+</html>
