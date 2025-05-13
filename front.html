@@ -71,6 +71,7 @@
     view.ui.add(document.getElementById('exportBtn'), 'bottom-right');
 
     view.ui.add(document.getElementById("thresholdInput"), "top-right")
+    document.getElementById('thresholdInput').style.display = 'none'
 
     let exportExtent = null;
     let utmExtent = null;
@@ -98,6 +99,7 @@
         exportExtent = event.graphic.geometry.extent;
 
         document.getElementById('exportBtn').style.display = 'block'
+
         map.add(graphicsLayer);
 
         const wmExtent = exportExtent/* your WebMercator extent */
@@ -170,7 +172,7 @@
       // const wkid = spatialReference.wkid;
 
       const prjText = await fetch(`https://epsg.io/${utmWKID}.esriwkt`).then(r => r.text());
-     // console.log(prjText.trim())
+      // console.log(prjText.trim())
       const bands = [
         {
           id: 1,
@@ -278,8 +280,14 @@ ${srsWkt.trim()}
       maskFolder.file('mask.jgw', jgw);
       maskFolder.file('mask.jpg.aux.xml', xml);
 
-      const content = await zip.generateAsync({ type: 'blob' });
-      saveAs(content, 'map-mask.zip');
+      const content = await zip.generateAsync({ type: 'blob' })
+      .then(content =>{
+        saveAs(content, 'map-mask.zip');
+      })
+      .catch(err =>{
+        alert("Download Failed: " + err.message)
+      })
+      
 
       /*  const maskLink = document.createElement('a');
        maskLink.href = maskUrl;
