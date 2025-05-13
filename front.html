@@ -1,141 +1,307 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
   <title>High-Res JPG Export (ArcGIS JS)</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
   <link rel="stylesheet" href="https://js.arcgis.com/4.30/esri/themes/light/main.css" />
   <style>
-    html, body, #viewDiv { padding:0; margin:0; width:100%; height:100%; }
+    html,
+    body,
+    #viewDiv {
+      padding: 0;
+      margin: 0;
+      width: 100%;
+      height: 100%;
+    }
   </style>
   <script src="https://js.arcgis.com/4.30/"></script>
+
+
 </head>
 
-  <!-- <button id="drawBtn">Draw Export Area</button> -->
-  <button id="exportBtn" style="display:none;">Export JPG</button>
-  <input id="thresholdInput" type="number" min="0.0" max="1.0" step="0.01" value="0.0" style="padding: 3px;" />
-  
-  <div id="viewDiv"></div>
+<!-- <button id="drawBtn">Draw Export Area</button> -->
+<button id="exportBtn" style="display:none;">Export JPG</button>
+<input id="thresholdInput" type="number" min="0.0" max="1.0" step="0.01" value="0.0" style="padding: 3px;" />
 
-  <script>
-    require([
-      "esri/Map",
-      "esri/views/MapView",
-      "esri/widgets/Sketch",
-      "esri/layers/GraphicsLayer",
-      "esri/Graphic",
-      "esri/widgets/Search" 
-    ], function(Map, MapView, Sketch, GraphicsLayer, Graphic, Search) {
+<div id="viewDiv"></div>
 
-      const map = new Map({ basemap: "satellite" });
-      const view = new MapView({ 
-        container: "viewDiv", 
-        map: map, 
-        center: [67.0011, 24.8607], 
-        zoom: 13 
-      });
-      const graphicsLayer = new GraphicsLayer(); 
-      
-      const searchWidget = new Search({
-            view: view
-        });
-        view.ui.add(searchWidget, {
-            position: "top-left",
-            index: 0
-        });
-      // Sketch widget to draw rectangle
-      const sketch = new Sketch({ 
-        view, 
-        layer: graphicsLayer, 
-        creationMode: 'single', 
-        availableCreateTools: ['rectangle'] 
-      });
-      view.ui.add(sketch, 'top-right');
-      view.ui.add(document.getElementById('drawBtn'), 'bottom-right');
-      view.ui.add(document.getElementById('exportBtn'), 'bottom-right');
-  
-      view.ui.add(document.getElementById("thresholdInput"), "top-right")
+<script>
+  require([
+    "esri/Map",
+    "esri/views/MapView",
+    "esri/widgets/Sketch",
+    "esri/layers/GraphicsLayer",
+    "esri/Graphic",
+    "esri/widgets/Search",
+    "esri/geometry/support/webMercatorUtils",
+    "esri/geometry/SpatialReference",
+    "esri/geometry/projection"
+  ], function (Map, MapView, Sketch, GraphicsLayer, Graphic, Search, webMercatorUtils, SpatialReference, projection) {
 
-      let exportExtent = null;
+    const map = new Map({ basemap: "satellite" });
+    const view = new MapView({
+      container: "viewDiv",
+      map: map,
+      center: [67.0011, 24.8607],
+      zoom: 13
+    });
+
+    const graphicsLayer = new GraphicsLayer();
+
+    const searchWidget = new Search({
+      view: view
+    });
+    view.ui.add(searchWidget, {
+      position: "top-left",
+      index: 0
+    });
+    // Sketch widget to draw rectangle
+    const sketch = new Sketch({
+      view,
+      layer: graphicsLayer,
+      creationMode: 'single',
+      availableCreateTools: ['rectangle']
+    });
+    view.ui.add(sketch, 'top-right');
+    view.ui.add(document.getElementById('drawBtn'), 'bottom-right');
+    view.ui.add(document.getElementById('exportBtn'), 'bottom-right');
+
+    view.ui.add(document.getElementById("thresholdInput"), "top-right")
+
+    let exportExtent = null;
+    let utmExtent = null;
+    let utmWKID = null;
+    projection.load();
 
     /*   document.getElementById('drawBtn').onclick = () => { 
         sketch.complete(); 
         document.getElementById('exportBtn').style.display = 'none'; 
       }; */
-    
-      sketch.on('create', event => {
-        
-        if (event.state !== 'complete') document.getElementById('exportBtn').style.display = 'none';
-        if(event.state === 'complete'){
-            exportExtent = event.graphic.geometry.extent;
-            document.getElementById('exportBtn').style.display = 'block';
-            map.add(graphicsLayer);
+
+    sketch.on('create', event => {
+
+      if (event.state !== 'complete') document.getElementById('exportBtn').style.display = 'none';
+      if (event.state === 'complete') {
+        event.graphic.symbol = {
+          type: "simple-fill",
+          color: [0, 0, 0, 0],      // fully transparent fill
+          outline: {
+            color: "white",
+            width: 1               // no border
+          }
         }
-       
-      });
 
-      document.getElementById('exportBtn').onclick = async () => {
-        if (!exportExtent) return;
+        exportExtent = event.graphic.geometry.extent;
 
-        // Convert extent to screen coordinates
-        const topLeft = view.toScreen({ x: exportExtent.xmin, y: exportExtent.ymax });
-        const bottomRight = view.toScreen({ x: exportExtent.xmax, y: exportExtent.ymin });
+        document.getElementById('exportBtn').style.display = 'block'
+        map.add(graphicsLayer);
 
-        // Calculate screen area to capture
-        const x = Math.min(topLeft.x, bottomRight.x);
-        const y = Math.min(topLeft.y, bottomRight.y);
-        const width = Math.abs(topLeft.x - bottomRight.x);
-        const height = Math.abs(topLeft.y - bottomRight.y);
+        const wmExtent = exportExtent/* your WebMercator extent */
+        const centreWM = {
+          x: (wmExtent.xmin + wmExtent.xmax) / 2,
+          y: (wmExtent.ymin + wmExtent.ymax) / 2,
+          spatialReference: wmExtent.spatialReference
+        };
 
-        // Take screenshot with specified screen area
-        const screenshot = await view.takeScreenshot({
-          area: { x, y, width, height },
-          format: 'jpg'
-        });
+        const geoExtent = webMercatorUtils.webMercatorToGeographic(centreWM)
 
-        const blob = await (await fetch(screenshot.dataUrl)).blob();
-        const formData = new FormData();
-        formData.append("image", blob, "image.jpg");
-        
-        formData.append("threshold", parseFloat(document.getElementById("thresholdInput").value));
+        const lon = geoExtent.x;
+        const lat = geoExtent.y;
+        const zone = Math.floor((lon + 180) / 6) + 1;
 
-        const resp = await fetch("http://localhost:5000/predict", {
-          method: "POST",
-          body: formData
-        });
+        utmWKID = (lat >= 0 ? 32600 : 32700) + zone;
 
-        const maskBlob = await resp.blob();
-        const maskUrl  = URL.createObjectURL(maskBlob);
+        const utmSR = new SpatialReference({ wkid: utmWKID });
 
-       /*  const zipBlob = await resp.blob();
-        const zipUrl = URL.createObjectURL(zipBlob);
+        utmExtent = projection.project(wmExtent, utmSR);
 
-        const zipLink = document.createElement('a');
-        zipLink.href = zipUrl;
-        zipLink.download = 'output.zip';  // will include mask.png + image.jgw
-        document.body.appendChild(zipLink);
-        zipLink.click();
-        document.body.removeChild(zipLink); */
-
-        const maskLink = document.createElement('a');
-        maskLink.href = maskUrl;
-        maskLink.download = 'mask.png';  // Name for the downloaded file
-        document.body.appendChild(maskLink);
-        maskLink.click();
-        document.body.removeChild(maskLink);
-        
-        // Trigger download
-        const a = document.createElement('a');
-        a.href = screenshot.dataUrl;
-        a.download = 'image.jpg';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-
-        graphicsLayer.removeAll()
-      };
+        //console.log("UTM Extent:", utmExtent);
+      }
 
     });
-  </script>
+
+
+    document.getElementById('exportBtn').onclick = async () => {
+      if (!exportExtent) return;
+
+      // Convert extent to screen coordinates
+      const { xmin, ymin, xmax, ymax, spatialReference } = utmExtent;
+      const topLeft = view.toScreen({ x: exportExtent.xmin, y: exportExtent.ymax });
+      const bottomRight = view.toScreen({ x: exportExtent.xmax, y: exportExtent.ymin });
+
+      // Calculate screen area to capture
+      const x = Math.min(topLeft.x, bottomRight.x);
+      const y = Math.min(topLeft.y, bottomRight.y);
+      const width = Math.abs(topLeft.x - bottomRight.x);
+      const height = Math.abs(topLeft.y - bottomRight.y);
+
+      // Take screenshot with specified screen area
+      const screenshot = await view.takeScreenshot({
+        area: { x, y, width, height },
+        format: 'jpg'
+      });
+
+      const blob = await (await fetch(screenshot.dataUrl)).blob();
+      // compute world file
+      const xRes = (xmax - xmin) / width;
+      const yRes = (ymax - ymin) / height;
+      const xCenter = xmin + xRes / 2;
+      const yCenter = ymax - yRes / 2;
+
+      // format to 10 decimals:
+      const fmt = n => n.toFixed(10);
+
+      const jgwLines = [
+        fmt(xRes),
+        "0.0000000000",
+        "0.0000000000",
+        fmt(-xRes),
+        fmt(xCenter),
+        fmt(yCenter)
+      ];
+      const jgw = jgwLines.join("\n");
+
+
+      // fetch .prj WKT from epsg.io
+      // const wkid = spatialReference.wkid;
+
+      const prjText = await fetch(`https://epsg.io/${utmWKID}.esriwkt`).then(r => r.text());
+     // console.log(prjText.trim())
+      const bands = [
+        {
+          id: 1,
+          covariance: "4416.228776331141,3820.290240171964,3622.975035018597",
+          mean: "162.38047349675",
+          median: "170.000000",
+          stddev: "66.454712220663",
+          histCounts: "352|329|141|…|171|802"
+        },
+        {
+          id: 2,
+          covariance: "3820.290240171964,3417.644401371425,3254.118445964614",
+          mean: "159.54061910748",
+          median: "164.000000",
+          stddev: "58.460622656378",
+          histCounts: "463|107|115|…|117|199"
+        },
+        {
+          id: 3,
+          covariance: "3622.975035018597,3254.118445964614,3188.923529438569",
+          mean: "142.88995390739",
+          median: "148.000000",
+          stddev: "56.470554534541",
+          histCounts: "249|59|72|…|19|122"
+        }
+      ];
+
+      // 3) Build the XML dynamically:
+      function buildAuxXml(srsWkt, bands) {
+        // XML header + opening PAMDataset
+        let xml = `<?xml version="1.0" encoding="UTF-8"?>
+<PAMDataset>
+  <Metadata domain="IMAGE_STRUCTURE">
+    <MDI key="COMPRESSION">JPEG</MDI>
+    <MDI key="INTERLEAVE">PIXEL</MDI>
+    <MDI key="SOURCE_COLOR_SPACE">YCbCr</MDI>
+  </Metadata>
+
+  <SRS dataAxisToSRSAxisMapping="2,1,3">
+${srsWkt.trim()}
+  </SRS>
+`;
+
+        // For each band, append its block
+        bands.forEach(b => {
+          xml += `
+  <PAMRasterBand band="${b.id}">
+    <Histograms>
+      <HistItem>
+        <HistMin>-0.5</HistMin>
+        <HistMax>255.5</HistMax>
+        <BucketCount>256</BucketCount>
+        <IncludeOutOfRange>1</IncludeOutOfRange>
+        <Approximate>0</Approximate>
+        <HistCounts>${b.histCounts}</HistCounts>
+      </HistItem>
+    </Histograms>
+    <Metadata domain="IMAGE_STRUCTURE">
+      <MDI key="COMPRESSION">JPEG</MDI>
+    </Metadata>
+    <Metadata>
+      <MDI key="STATISTICS_COVARIANCES">${b.covariance}</MDI>
+      <MDI key="STATISTICS_EXCLUDEDVALUES"/>
+      <MDI key="STATISTICS_MAXIMUM">255</MDI>
+      <MDI key="STATISTICS_MEAN">${b.mean}</MDI>
+      <MDI key="STATISTICS_MEDIAN">${b.median}</MDI>
+      <MDI key="STATISTICS_MINIMUM">0</MDI>
+      <MDI key="STATISTICS_SKIPFACTORX">1</MDI>
+      <MDI key="STATISTICS_SKIPFACTORY">1</MDI>
+      <MDI key="STATISTICS_STDDEV">${b.stddev}</MDI>
+    </Metadata>
+  </PAMRasterBand>
+`;
+        });
+
+        // Close PAMDataset
+        xml += `</PAMDataset>`;
+        return xml;
+      }
+
+      // 4) Use it:
+      const xml = buildAuxXml(prjText, bands);
+
+      const formData = new FormData();
+      formData.append("image", blob, "image.jpg");
+      formData.append("threshold", parseFloat(document.getElementById("thresholdInput").value));
+
+      const resp = await fetch("http://localhost:5000/predict", {
+        method: "POST",
+        body: formData
+      });
+
+      const zipBlob = await resp.blob();
+      const zipUrl = URL.createObjectURL(zipBlob);
+      // create ZIP
+      const zip = new JSZip();
+
+      const imgFolder = zip.folder('image');
+      imgFolder.file('image.jpg', blob);
+      imgFolder.file('image.jgw', jgw);
+      imgFolder.file('image.jpg.aux.xml', xml);
+
+      const maskFolder = zip.folder('mask');
+      maskFolder.file('mask.jpg', zipBlob);
+      maskFolder.file('mask.jgw', jgw);
+      maskFolder.file('mask.jpg.aux.xml', xml);
+
+      const content = await zip.generateAsync({ type: 'blob' });
+      saveAs(content, 'map-mask.zip');
+
+      /*  const maskLink = document.createElement('a');
+       maskLink.href = maskUrl;
+       maskLink.download = 'mask.png';  // Name for the downloaded file
+       document.body.appendChild(maskLink);
+       maskLink.click();
+       document.body.removeChild(maskLink); */
+
+      // Trigger download
+      /*    const a = document.createElement('a');
+         a.href = screenshot.dataUrl;
+         a.download = 'image.jpg';
+         document.body.appendChild(a);
+         a.click();
+         document.body.removeChild(a); */
+
+      graphicsLayer.removeAll()
+      document.getElementById('exportBtn').style.display = 'none'
+    };
+
+  });
+</script>
 </body>
+
 </html>
