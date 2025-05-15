@@ -10,7 +10,7 @@ This Flask web application allows users to upload RGB satellite images and recei
 - Automatic resizing and threshold-based binary masking
 
 ## Requirements
-- Python 3.8+
+- Python 3.11
 - flask
 - flask-cors
 - tensorflow
