@@ -86,6 +86,7 @@
     let exportExtent = null;
     let utmExtent = null;
     let utmWKID = null;
+    let layer
     projection.load();
 
     /*   document.getElementById('drawBtn').onclick = () => { 
@@ -97,6 +98,8 @@
 
       if (event.state !== 'complete') document.getElementById('exportBtn').style.display = 'none';
       if (event.state === 'complete') {
+        map.remove(layer)
+
         event.graphic.symbol = {
           type: "simple-fill",
           color: [0, 0, 0, 0],      // fully transparent fill
@@ -138,29 +141,52 @@
 
 
     function displayGeoJSON(geojson) {
-    
-      console.log(geojson)
-      const epsgCode = parseInt(geojson.crs.properties.name.split("::").pop());
-      console.log(epsgCode);
 
-      const layer = new GeoJSONLayer({
-        source: geojson,
+      //const epsgCode = parseInt(geojson.crs.properties.name.split("::").pop());
+      const blob = new Blob([JSON.stringify(geojson)], {
+        type: "application/json"
+      });
+
+      // URL reference to the blob
+      const url = URL.createObjectURL(blob);
+
+      layer = new GeoJSONLayer({
+        url: url,
         // tell it the native CRS of the data:
-        spatialReference: { epsgCode },
+       // spatialReference: { wkid: epsgCode },
         renderer: {
           type: "simple",          // SimpleRenderer
           symbol: {
             type: "simple-fill",   // SimpleFillSymbol
-            color: [0, 255, 255, 0.2],
+            color: [6, 99, 155, 1],
             outline: {
-              color: [0, 255, 255, 0.8],
-              width: 2
+              color: [0, 255, 255, 0.5],
+              width: 1
             }
           }
         }
       });
-
+    
       map.add(layer);
+
+    layer.when().then(() => {
+        // 2. Query all features from the layer  
+        return layer.queryFeatures();      // returns a FeatureSet promise :contentReference[oaicite:0]{index=0}
+      })
+      .then(featureSet => {
+        // 3. Sum up the area_sqkm attribute  
+        const totalArea = featureSet.features.reduce((sum, feature) => {
+          console.log(feature)
+          // ensure numeric parsing
+          return sum + Number(feature.attributes.area_sqkm);
+        }, 0);
+
+        console.log("Total area (sq km):", totalArea);
+        // optionally display in UI…
+      })
+      .catch(error => {
+        console.error("Error querying or summing features:", error);
+      });
     }
 
 
@@ -332,10 +358,10 @@ ${srsWkt.trim()}
        
         filePromises.push(p);
 
-        if (relativePath.endsWith(".geojson")) {
+        if (relativePath === "geojsonWGS1984.geojson") {
           const text = await file.async("text");  // Use 'text' instead of 'blob'
           const geojson = JSON.parse(text);
-         // displayGeoJSON(geojson);
+         displayGeoJSON(geojson);
         }
       });
       await Promise.all(filePromises);

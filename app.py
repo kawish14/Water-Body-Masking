@@ -122,6 +122,11 @@ def predict():
     gdf.to_file(polygon_io, driver='GeoJSON')
     polygon_io.seek(0)
 
+    wgs84_io = BytesIO()
+    gdf_wgs84 = gdf.to_crs(epsg=4326)              # reproject
+    gdf_wgs84.to_file(wgs84_io, driver="GeoJSON") # fresh buffer
+    wgs84_io.seek(0)
+
     zip_io = BytesIO()
     with zipfile.ZipFile(zip_io, 'w') as zf:
         #zf.writestr('image/image.jpg', original_image_bytes)
@@ -129,6 +134,7 @@ def predict():
         zf.writestr('mask.jgw', jgw_bytes)
         zf.writestr('mask.jpg.aux.xml', xml_bytes)
         zf.writestr('mask_polygons.geojson', polygon_io.getvalue())
+        zf.writestr("geojsonWGS1984.geojson", wgs84_io.getvalue())
 
     zip_io.seek(0)
     return send_file(zip_io, mimetype='application/zip', as_attachment=True, download_name='output.zip')
