@@ -9,7 +9,11 @@ from PIL import Image
 import datetime
 import zipfile
 from pyproj import CRS
-from xml.etree.ElementTree import Element, SubElement, ElementTree
+from rasterio import Affine
+from rasterio.features import shapes
+import geopandas as gpd
+import json
+
 
 # Import the model from model.py
 from model import ViT
@@ -19,6 +23,24 @@ CORS(app)
 
 #OUTPUT_DIR = "saved_masks"
 #os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+def parse_jgw(jgw_bytes):
+    lines = jgw_bytes.decode('utf-8').splitlines()
+    x_res = float(lines[0])  # pixel width
+    y_res = float(lines[3])  # pixel height (typically negative)
+    x_origin = float(lines[4])  # top left X
+    y_origin = float(lines[5])  # top left Y
+    return x_res, y_res, x_origin, y_origin
+
+def extract_crs_from_xml(xml_bytes):
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(xml_bytes)
+    srs_element = root.find("SRS")
+    if srs_element is not None:
+        return CRS.from_wkt(srs_element.text.strip())
+    else:
+        raise ValueError("No <SRS> element found in XML.")
+    
 @app.route("/")
 def index():
     return render_template("front.html")
@@ -29,6 +51,8 @@ def predict():
         return jsonify({"error": "No image file provided"}), 400
     
     file = request.files['image']
+    jgw = request.files['jgw']
+    xml = request.files['xml']
 
     img = load_img(BytesIO(file.read()), target_size=(128, 128))
     img = np.expand_dims(img, axis=0)
@@ -40,7 +64,17 @@ def predict():
         threshold = float(request.form.get('threshold', 0.5))
         mask = (mask > threshold).astype(np.uint8)
         mask = np.squeeze(mask)
-    mask_img = Image.fromarray((mask * 255).astype(np.uint8), mode='L')  # 'L' = grayscale
+    mask_scaled = (mask * 255).astype(np.uint8)
+    reclassified_mask = np.zeros_like(mask_scaled)
+    reclassified_mask[(mask_scaled >= 0) & (mask_scaled <= 50)] = 0
+    reclassified_mask[(mask_scaled > 50) & (mask_scaled <= 170)] = 1
+    reclassified_mask[(mask_scaled > 170) & (mask_scaled <= 255)] = 2
+
+    visible_mask = np.zeros_like(reclassified_mask)
+    visible_mask[reclassified_mask == 1] = 127
+    visible_mask[reclassified_mask == 2] = 255
+    mask_img = Image.fromarray(visible_mask, mode='L')
+    #mask_img = Image.fromarray((mask * 255).astype(np.uint8), mode='L')  # 'L' = grayscale
     
     original_image = Image.open(file)
     original_size = original_image.size  # (width, height)
@@ -59,9 +93,49 @@ def predict():
     #mask_io.seek(0)
     mask_io_r.seek(0)
 
-    response = make_response(send_file(mask_io_r, mimetype='image/png'))
-    response.headers['Content-Length'] = str(mask_io_r.getbuffer().nbytes)
-    return response
+    jgw_bytes = jgw.read()
+    xml_bytes = xml.read()
+
+    x_res, y_res, x_origin, y_origin = parse_jgw(jgw_bytes)
+    print(x_res, y_res, x_origin, y_origin)
+    transform = Affine(x_res, 0, x_origin, 0, y_res, y_origin)
+
+    # Convert mask image to NumPy array
+    resized_mask = Image.fromarray(reclassified_mask, mode='L').resize(original_size, resample=Image.NEAREST)
+    resized_mask_array = np.array(resized_mask)
+
+    results = (
+    {'properties': {'value': int(v)}, 'geometry': s}
+    for s, v in shapes(resized_mask_array, transform=transform)
+    if int(v) != 0  # Skip background
+    )
+
+    # Build GeoDataFrame
+    crs = extract_crs_from_xml(xml_bytes)
+    gdf = gpd.GeoDataFrame.from_features(results, crs=crs)
+    if not crs.is_projected:
+        raise ValueError("CRS must be projected to calculate area correctly.")
+    
+    gdf['area_sqkm'] = gdf['geometry'].area / 1e6  # 1,000,000 m² in 1 km²
+
+    polygon_io = BytesIO()
+    gdf.to_file(polygon_io, driver='GeoJSON')
+    polygon_io.seek(0)
+
+    zip_io = BytesIO()
+    with zipfile.ZipFile(zip_io, 'w') as zf:
+        #zf.writestr('image/image.jpg', original_image_bytes)
+        zf.writestr('mask.jpg', mask_io_r.getvalue())
+        zf.writestr('mask.jgw', jgw_bytes)
+        zf.writestr('mask.jpg.aux.xml', xml_bytes)
+        zf.writestr('mask_polygons.geojson', polygon_io.getvalue())
+
+    zip_io.seek(0)
+    return send_file(zip_io, mimetype='application/zip', as_attachment=True, download_name='output.zip')
+
+    #response = make_response(send_file(mask_io_r, mimetype='image/jpg'))
+    #response.headers['Content-Length'] = str(mask_io_r.getbuffer().nbytes)
+    #return response
     #return send_file(zip_io, mimetype='application/zip', as_attachment=True, download_name='output.zip')
     #return jsonify({"message": "Mask saved", "file": save_path}), 200
 

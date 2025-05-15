@@ -7,7 +7,7 @@
   <title>High-Res JPG Export (ArcGIS JS)</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
-  <link rel="stylesheet" href="https://js.arcgis.com/4.30/esri/themes/light/main.css" />
+  <link rel="stylesheet" href="https://js.arcgis.com/4.30/esri/themes/dark/main.css" />
   <style>
     html,
     body,
@@ -17,6 +17,14 @@
       width: 100%;
       height: 100%;
     }
+    #exportBtn{
+      padding: 5px;
+      padding-left: 14px;
+      padding-right: 12px;
+      background-color: #242424;
+      color:#c5c1c1;
+      cursor: pointer;
+    }
   </style>
   <script src="https://js.arcgis.com/4.30/"></script>
 
@@ -25,7 +33,7 @@
 
 <!-- <button id="drawBtn">Draw Export Area</button> -->
 <button id="exportBtn" style="display:none;">Export JPG</button>
-<input id="thresholdInput" type="number" min="0.0" max="1.0" step="0.01" value="0.0" style="padding: 3px;" />
+<input id="thresholdInput" type="number" min="0.0" max="1.0" step="0.01" value="0.0" />
 
 <div id="viewDiv"></div>
 
@@ -39,8 +47,10 @@
     "esri/widgets/Search",
     "esri/geometry/support/webMercatorUtils",
     "esri/geometry/SpatialReference",
-    "esri/geometry/projection"
-  ], function (Map, MapView, Sketch, GraphicsLayer, Graphic, Search, webMercatorUtils, SpatialReference, projection) {
+    "esri/geometry/projection",
+    "esri/layers/GeoJSONLayer",
+  ], function (Map, MapView, Sketch, GraphicsLayer, Graphic, Search, webMercatorUtils, SpatialReference, 
+                projection, GeoJSONLayer) {
 
     const map = new Map({ basemap: "satellite" });
     const view = new MapView({
@@ -127,7 +137,36 @@
     });
 
 
+    function displayGeoJSON(geojson) {
+    
+      console.log(geojson)
+      const epsgCode = parseInt(geojson.crs.properties.name.split("::").pop());
+      console.log(epsgCode);
+
+      const layer = new GeoJSONLayer({
+        source: geojson,
+        // tell it the native CRS of the data:
+        spatialReference: { epsgCode },
+        renderer: {
+          type: "simple",          // SimpleRenderer
+          symbol: {
+            type: "simple-fill",   // SimpleFillSymbol
+            color: [0, 255, 255, 0.2],
+            outline: {
+              color: [0, 255, 255, 0.8],
+              width: 2
+            }
+          }
+        }
+      });
+
+      map.add(layer);
+    }
+
+
     document.getElementById('exportBtn').onclick = async () => {
+      const filePromises = [];
+
       if (!exportExtent) return;
 
       // Convert extent to screen coordinates
@@ -260,6 +299,11 @@ ${srsWkt.trim()}
       formData.append("image", blob, "image.jpg");
       formData.append("threshold", parseFloat(document.getElementById("thresholdInput").value));
 
+      const jgwBlob = new Blob([jgw], { type: "text/plain" });
+      const xmlBlob = new Blob([xml], { type: "application/xml" })
+      formData.append("jgw", jgwBlob, "mask.jgw");
+      formData.append("xml", xmlBlob, "mask.jpg.aux.xml");
+
       const resp = await fetch("http://localhost:5000/predict", {
         method: "POST",
         body: formData
@@ -270,7 +314,37 @@ ${srsWkt.trim()}
 
 
       const zipBlob = await resp.blob();
-      const zipUrl = URL.createObjectURL(zipBlob);
+      const respZip = await JSZip.loadAsync(zipBlob);
+
+      const zip = new JSZip();
+
+      const imgFolder = zip.folder('image');
+      imgFolder.file('image.jpg', blob);
+      imgFolder.file('image.jgw', jgw);
+      imgFolder.file('image.jpg.aux.xml', xml);
+
+      const maskFolder = zip.folder('mask');
+
+      respZip.forEach(async (relativePath, file) => {
+         const p = file.async("blob").then(async content => {
+          maskFolder.file(relativePath, content);
+        });
+       
+        filePromises.push(p);
+
+        if (relativePath.endsWith(".geojson")) {
+          const text = await file.async("text");  // Use 'text' instead of 'blob'
+          const geojson = JSON.parse(text);
+         // displayGeoJSON(geojson);
+        }
+      });
+      await Promise.all(filePromises);
+
+      const finalZip = await zip.generateAsync({ type: 'blob' });
+      saveAs(finalZip, "result.zip");
+      
+      //saveAs(zipBlob, "result.zip"); 
+      /*const zipUrl = URL.createObjectURL(zipBlob);
       // create ZIP
       const zip = new JSZip();
 
@@ -282,18 +356,20 @@ ${srsWkt.trim()}
       const maskFolder = zip.folder('mask');
       maskFolder.file('mask.jpg', zipBlob);
       maskFolder.file('mask.jgw', jgw);
-      maskFolder.file('mask.jpg.aux.xml', xml);
+      maskFolder.file('mask.jpg.aux.xml', xml); */
 
-      const content = await zip.generateAsync({ type: 'blob' })
+      /* const content = await zip.generateAsync({ type: 'blob' })
       .then(content =>{
         saveAs(content, 'map-mask.zip');
       })
       .catch(err =>{
         alert("Download Failed: " + err.message)
-      })
+      }) */
       
+      /* const maskBlob = await resp.blob();
+      const maskUrl = URL.createObjectURL(maskBlob);
 
-      /*  const maskLink = document.createElement('a');
+      const maskLink = document.createElement('a');
        maskLink.href = maskUrl;
        maskLink.download = 'mask.png';  // Name for the downloaded file
        document.body.appendChild(maskLink);

@@ -46,7 +46,7 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 Then create and activate the environment:
 ```bash
 python -m venv venv
-.venv\Scripts\activate
+venv\Scripts\activate
 ```
 
 ### 4. Run the App
