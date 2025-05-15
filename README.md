@@ -26,6 +26,7 @@ You can install them using:
 ```bash
 pip install -r requirements.txt
 ```
+Install above libraries after creating virtual environment.
 
 ### 1. Clone the Repository
 ```bash

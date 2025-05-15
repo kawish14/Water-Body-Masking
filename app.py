@@ -1,4 +1,4 @@
-from flask import Flask, request, send_file, jsonify, make_response
+from flask import Flask, request, send_file, jsonify, make_response, render_template
 from flask_cors import CORS
 import numpy as np
 import os
@@ -19,9 +19,11 @@ CORS(app)
 
 #OUTPUT_DIR = "saved_masks"
 #os.makedirs(OUTPUT_DIR, exist_ok=True)
+@app.route("/")
+def index():
+    return render_template("front.html")
 
 @app.route("/predict", methods=["POST"])
-
 def predict():
     if 'image' not in request.files:
         return jsonify({"error": "No image file provided"}), 400
@@ -40,7 +42,6 @@ def predict():
         mask = np.squeeze(mask)
     mask_img = Image.fromarray((mask * 255).astype(np.uint8), mode='L')  # 'L' = grayscale
     
-
     original_image = Image.open(file)
     original_size = original_image.size  # (width, height)
     print(original_size)

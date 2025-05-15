@@ -263,7 +263,11 @@ ${srsWkt.trim()}
       const resp = await fetch("http://localhost:5000/predict", {
         method: "POST",
         body: formData
-      });
+      })
+        .catch(error => {
+          alert(`An error occurred during the prediction: ${error.message}`);
+        })
+
 
       const zipBlob = await resp.blob();
       const zipUrl = URL.createObjectURL(zipBlob);
