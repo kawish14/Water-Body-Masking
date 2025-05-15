@@ -19,8 +19,9 @@ This Flask web application allows users to upload RGB satellite images and recei
 - pandas
 - matplotlib
 - scikit-learn
-- os
-- io
+- rasterio
+- geopandas
+- pyproj
 
 You can install them using:
 ```bash
