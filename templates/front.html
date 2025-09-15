@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>High-Res JPG Export (ArcGIS JS)</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+  <link rel="stylesheet" href="https://js.arcgis.com/4.30/esri/themes/dark/main.css" />
+  <style>
+    html,
+    body,
+    #viewDiv {
+      padding: 0;
+      margin: 0;
+      width: 100%;
+      height: 100%;
+    }
+    #exportBtn{
+      padding: 5px;
+      padding-left: 14px;
+      padding-right: 12px;
+      background-color: #242424;
+      color:#c5c1c1;
+      cursor: pointer;
+    }
+    p#area {
+    background-color: #242424;
+    color: #9f9f9f;
+    padding-left: 14px;
+    padding-right: 14px;
+    padding-bottom: 5PX;
+    Padding-top: 5px;
+    font-weight: 600;
+}
+  </style>
+  <script src="https://js.arcgis.com/4.30/"></script>
+
+
+</head>
+
+<!-- <button id="drawBtn">Draw Export Area</button> -->
+<button id="exportBtn" style="display:none;">Export JPG</button>
+<input id="thresholdInput" type="number" min="0.0" max="1.0" step="0.01" value="0.0" />
+<p id="area"></p>
+
+<div id="viewDiv"></div>
+
+<script>
+  require([
+    "esri/Map",
+    "esri/views/MapView",
+    "esri/widgets/Sketch",
+    "esri/layers/GraphicsLayer",
+    "esri/Graphic",
+    "esri/widgets/Search",
+    "esri/geometry/support/webMercatorUtils",
+    "esri/geometry/SpatialReference",
+    "esri/geometry/projection",
+    "esri/layers/GeoJSONLayer",
+  ], function (Map, MapView, Sketch, GraphicsLayer, Graphic, Search, webMercatorUtils, SpatialReference, 
+                projection, GeoJSONLayer) {
+
+    const map = new Map({ basemap: "satellite" });
+    const view = new MapView({
+      container: "viewDiv",
+      map: map,
+      center: [67.0011, 24.8607],
+      zoom: 13
+    });
+
+    const graphicsLayer = new GraphicsLayer();
+
+    const searchWidget = new Search({
+      view: view
+    });
+    view.ui.add(searchWidget, {
+      position: "top-left",
+      index: 0
+    });
+    // Sketch widget to draw rectangle
+    const sketch = new Sketch({
+      view,
+      layer: graphicsLayer,
+      creationMode: 'single',
+      availableCreateTools: ['rectangle']
+    });
+    view.ui.add(sketch, 'top-right');
+    view.ui.add(document.getElementById('drawBtn'), 'bottom-right');
+    view.ui.add(document.getElementById('exportBtn'), 'bottom-right');
+    view.ui.add(document.getElementById('area'), 'bottom-left');
+
+    view.ui.add(document.getElementById("thresholdInput"), "top-right")
+    document.getElementById('thresholdInput').style.display = 'none'
+
+    let exportExtent = null;
+    let utmExtent = null;
+    let utmWKID = null;
+    let layer
+    projection.load();
+
+    /*   document.getElementById('drawBtn').onclick = () => { 
+        sketch.complete(); 
+        document.getElementById('exportBtn').style.display = 'none'; 
+      }; */
+
+    sketch.on('create', event => {
+
+      if (event.state !== 'complete') document.getElementById('exportBtn').style.display = 'none';
+      if (event.state === 'complete') {
+        map.remove(layer)
+
+        event.graphic.symbol = {
+          type: "simple-fill",
+          color: [0, 0, 0, 0],      // fully transparent fill
+          outline: {
+            color: "white",
+            width: 1               // no border
+          }
+        }
+
+        exportExtent = event.graphic.geometry.extent;
+
+        document.getElementById('exportBtn').style.display = 'block'
+
+        map.add(graphicsLayer);
+
+        const wmExtent = exportExtent/* your WebMercator extent */
+        const centreWM = {
+          x: (wmExtent.xmin + wmExtent.xmax) / 2,
+          y: (wmExtent.ymin + wmExtent.ymax) / 2,
+          spatialReference: wmExtent.spatialReference
+        };
+
+        const geoExtent = webMercatorUtils.webMercatorToGeographic(centreWM)
+
+        const lon = geoExtent.x;
+        const lat = geoExtent.y;
+        const zone = Math.floor((lon + 180) / 6) + 1;
+
+        utmWKID = (lat >= 0 ? 32600 : 32700) + zone;
+
+        const utmSR = new SpatialReference({ wkid: utmWKID });
+
+        utmExtent = projection.project(wmExtent, utmSR);
+
+        //console.log("UTM Extent:", utmExtent);
+      }
+
+    });
+
+
+    function displayGeoJSON(geojson) {
+      console.log(`Geojson ${geojson}`)
+
+      //const epsgCode = parseInt(geojson.crs.properties.name.split("::").pop());
+      const blob = new Blob([JSON.stringify(geojson)], {
+        type: "application/json"
+      });
+
+      // URL reference to the blob
+      const url = URL.createObjectURL(blob);
+
+      layer = new GeoJSONLayer({
+        url: url,
+        // tell it the native CRS of the data:
+       // spatialReference: { wkid: epsgCode },
+        renderer: {
+          type: "simple",          // SimpleRenderer
+          symbol: {
+            type: "simple-fill",   // SimpleFillSymbol
+            color: [6, 99, 155, 1],
+            outline: {
+              color: [0, 255, 255, 0.5],
+              width: 1
+            }
+          }
+        }
+      });
+    
+      map.add(layer);
+
+    layer.when().then(() => {
+        // 2. Query all features from the layer  
+        return layer.queryFeatures();      // returns a FeatureSet promise :contentReference[oaicite:0]{index=0}
+      })
+      .then(featureSet => {
+        // 3. Sum up the area_sqkm attribute  
+        const totalArea = featureSet.features.reduce((sum, feature) => {
+          //console.log(feature)
+          // ensure numeric parsing
+          return sum + Number(feature.attributes.area_sqkm);
+        }, 0);
+        document.getElementById('area').innerHTML = `Total area (sq km): ${totalArea.toFixed(2)}`
+        console.log("Total area (sq km):", totalArea);
+        // optionally display in UI…
+      })
+      .catch(error => {
+        console.error("Error querying or summing features:", error);
+      });
+    }
+
+
+    document.getElementById('exportBtn').onclick = async () => {
+      const filePromises = [];
+
+      if (!exportExtent) return;
+
+      // Convert extent to screen coordinates
+      const { xmin, ymin, xmax, ymax, spatialReference } = utmExtent;
+      const topLeft = view.toScreen({ x: exportExtent.xmin, y: exportExtent.ymax });
+      const bottomRight = view.toScreen({ x: exportExtent.xmax, y: exportExtent.ymin });
+
+      // Calculate screen area to capture
+      const x = Math.min(topLeft.x, bottomRight.x);
+      const y = Math.min(topLeft.y, bottomRight.y);
+      const width = Math.abs(topLeft.x - bottomRight.x);
+      const height = Math.abs(topLeft.y - bottomRight.y);
+
+      // Take screenshot with specified screen area
+      const screenshot = await view.takeScreenshot({
+        area: { x, y, width, height },
+        format: 'jpg'
+      });
+
+      const blob = await (await fetch(screenshot.dataUrl)).blob();
+      // compute world file
+      const xRes = (xmax - xmin) / width;
+      const yRes = (ymax - ymin) / height;
+      const xCenter = xmin + xRes / 2;
+      const yCenter = ymax - yRes / 2;
+
+      // format to 10 decimals:
+      const fmt = n => n.toFixed(10);
+
+      const jgwLines = [
+        fmt(xRes),
+        "0.0000000000",
+        "0.0000000000",
+        fmt(-xRes),
+        fmt(xCenter),
+        fmt(yCenter)
+      ];
+      const jgw = jgwLines.join("\n");
+
+
+      // fetch .prj WKT from epsg.io
+      // const wkid = spatialReference.wkid;
+
+      const prjText = await fetch(`https://epsg.io/${utmWKID}.esriwkt`).then(r => r.text());
+      // console.log(prjText.trim())
+      const bands = [
+        {
+          id: 1,
+          covariance: "4416.228776331141,3820.290240171964,3622.975035018597",
+          mean: "162.38047349675",
+          median: "170.000000",
+          stddev: "66.454712220663",
+          histCounts: "352|329|141|…|171|802"
+        },
+        {
+          id: 2,
+          covariance: "3820.290240171964,3417.644401371425,3254.118445964614",
+          mean: "159.54061910748",
+          median: "164.000000",
+          stddev: "58.460622656378",
+          histCounts: "463|107|115|…|117|199"
+        },
+        {
+          id: 3,
+          covariance: "3622.975035018597,3254.118445964614,3188.923529438569",
+          mean: "142.88995390739",
+          median: "148.000000",
+          stddev: "56.470554534541",
+          histCounts: "249|59|72|…|19|122"
+        }
+      ];
+
+      // 3) Build the XML dynamically:
+      function buildAuxXml(srsWkt, bands) {
+        // XML header + opening PAMDataset
+        let xml = `<?xml version="1.0" encoding="UTF-8"?>
+<PAMDataset>
+  <Metadata domain="IMAGE_STRUCTURE">
+    <MDI key="COMPRESSION">JPEG</MDI>
+    <MDI key="INTERLEAVE">PIXEL</MDI>
+    <MDI key="SOURCE_COLOR_SPACE">YCbCr</MDI>
+  </Metadata>
+
+  <SRS dataAxisToSRSAxisMapping="2,1,3">
+${srsWkt.trim()}
+  </SRS>
+`;
+
+        // For each band, append its block
+        bands.forEach(b => {
+          xml += `
+  <PAMRasterBand band="${b.id}">
+    <Histograms>
+      <HistItem>
+        <HistMin>-0.5</HistMin>
+        <HistMax>255.5</HistMax>
+        <BucketCount>256</BucketCount>
+        <IncludeOutOfRange>1</IncludeOutOfRange>
+        <Approximate>0</Approximate>
+        <HistCounts>${b.histCounts}</HistCounts>
+      </HistItem>
+    </Histograms>
+    <Metadata domain="IMAGE_STRUCTURE">
+      <MDI key="COMPRESSION">JPEG</MDI>
+    </Metadata>
+    <Metadata>
+      <MDI key="STATISTICS_COVARIANCES">${b.covariance}</MDI>
+      <MDI key="STATISTICS_EXCLUDEDVALUES"/>
+      <MDI key="STATISTICS_MAXIMUM">255</MDI>
+      <MDI key="STATISTICS_MEAN">${b.mean}</MDI>
+      <MDI key="STATISTICS_MEDIAN">${b.median}</MDI>
+      <MDI key="STATISTICS_MINIMUM">0</MDI>
+      <MDI key="STATISTICS_SKIPFACTORX">1</MDI>
+      <MDI key="STATISTICS_SKIPFACTORY">1</MDI>
+      <MDI key="STATISTICS_STDDEV">${b.stddev}</MDI>
+    </Metadata>
+  </PAMRasterBand>
+`;
+        });
+
+        // Close PAMDataset
+        xml += `</PAMDataset>`;
+        return xml;
+      }
+
+      // 4) Use it:
+      const xml = buildAuxXml(prjText, bands);
+
+      const formData = new FormData();
+      formData.append("image", blob, "image.jpg");
+      formData.append("threshold", parseFloat(document.getElementById("thresholdInput").value));
+
+      const jgwBlob = new Blob([jgw], { type: "text/plain" });
+      const xmlBlob = new Blob([xml], { type: "application/xml" })
+      formData.append("jgw", jgwBlob, "mask.jgw");
+      formData.append("xml", xmlBlob, "mask.jpg.aux.xml");
+
+      const resp = await fetch("http://localhost:5000/predict", {
+        method: "POST",
+        body: formData
+      })
+        .catch(error => {
+          alert(`An error occurred during the prediction: ${error.message}`);
+        })
+
+
+      const zipBlob = await resp.blob();
+      const respZip = await JSZip.loadAsync(zipBlob);
+
+      const zip = new JSZip();
+
+      const imgFolder = zip.folder('image');
+      imgFolder.file('image.jpg', blob);
+      imgFolder.file('image.jgw', jgw);
+      imgFolder.file('image.jpg.aux.xml', xml);
+
+      const maskFolder = zip.folder('mask');
+
+      respZip.forEach(async (relativePath, file) => {
+         const p = file.async("blob").then(async content => {
+
+          maskFolder.file(relativePath, content);
+        });
+       
+        filePromises.push(p);
+
+        if (relativePath === "geojsonWGS1984.geojson") {
+          const text = await file.async("text");  // Use 'text' instead of 'blob'
+          const geojson = JSON.parse(text);
+         displayGeoJSON(geojson);
+        }
+      });
+      await Promise.all(filePromises);
+
+      const finalZip = await zip.generateAsync({ type: 'blob' });
+      saveAs(finalZip, "result.zip");
+      
+      //saveAs(zipBlob, "result.zip"); 
+      /*const zipUrl = URL.createObjectURL(zipBlob);
+      // create ZIP
+      const zip = new JSZip();
+
+      const imgFolder = zip.folder('image');
+      imgFolder.file('image.jpg', blob);
+      imgFolder.file('image.jgw', jgw);
+      imgFolder.file('image.jpg.aux.xml', xml);
+
+      const maskFolder = zip.folder('mask');
+      maskFolder.file('mask.jpg', zipBlob);
+      maskFolder.file('mask.jgw', jgw);
+      maskFolder.file('mask.jpg.aux.xml', xml); */
+
+      /* const content = await zip.generateAsync({ type: 'blob' })
+      .then(content =>{
+        saveAs(content, 'map-mask.zip');
+      })
+      .catch(err =>{
+        alert("Download Failed: " + err.message)
+      }) */
+      
+      /* const maskBlob = await resp.blob();
+      const maskUrl = URL.createObjectURL(maskBlob);
+
+      const maskLink = document.createElement('a');
+       maskLink.href = maskUrl;
+       maskLink.download = 'mask.png';  // Name for the downloaded file
+       document.body.appendChild(maskLink);
+       maskLink.click();
+       document.body.removeChild(maskLink); */
+
+      // Trigger download
+      /*    const a = document.createElement('a');
+         a.href = screenshot.dataUrl;
+         a.download = 'image.jpg';
+         document.body.appendChild(a);
+         a.click();
+         document.body.removeChild(a); */
+
+      graphicsLayer.removeAll()
+      document.getElementById('exportBtn').style.display = 'none'
+    };
+
+  });
+</script>
+</body>
+
+</html>

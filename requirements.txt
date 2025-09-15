@@ -1,0 +1,11 @@
+flask
+flask-cors
+tensorflow
+pillow
+numpy
+pandas
+matplotlib
+scikit-learn
+rasterio
+geopandas
+pyproj
