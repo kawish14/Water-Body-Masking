@@ -54,4 +54,9 @@ venv\Scripts\activate
 ```bash
 python app.py
 ```
+#### or
+```
+python app.py run --host=0.0.0.0 --port=5000
+```
+
 The application will start on http://127.0.0.1:5000/
